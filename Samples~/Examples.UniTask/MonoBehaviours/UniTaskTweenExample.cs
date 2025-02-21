@@ -8,14 +8,17 @@ namespace HyperTween.Examples
     {
         private async void Start()
         {
-            var tweenHandle = (TweenHandle)HyperTweenFactory.CreateTween()
-                .WithDuration(1f)
-                .Play();
+            while (gameObject)
+            {
+                var tweenHandle = (TweenHandle)HyperTweenFactory.CreateTween()
+                    .WithDuration(1f)
+                    .Play();
             
-            await tweenHandle
-                .AsUniTask();
+                await tweenHandle
+                    .AsUniTask();
             
-            Debug.Log("Tween task completed");
+                Debug.Log("Tween task completed");
+            }
         }
     }
 }
