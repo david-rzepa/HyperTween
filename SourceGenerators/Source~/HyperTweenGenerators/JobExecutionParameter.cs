@@ -9,6 +9,7 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
 {
     private enum Type
     {
+        SystemState,
         UnmanagedReadOnlyDirectComponent,
         ManagedReadOnlyDirectComponent,
         ReadOnlyIndirectComponent,
@@ -28,6 +29,15 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     private static Type GetType(IParameterSymbol parameterSymbol, ITypeSymbol invokeComponentSymbol)
     {
         var fullName = parameterSymbol.Type.GetFullName();
+        
+        if (fullName == "Unity.Entities.SystemState")
+        {
+            return parameterSymbol.RefKind switch
+            {
+                RefKind.Ref => Type.SystemState,
+                _ => throw new InvalidOperationException("Component parameters must be ref.")
+            };
+        }
         
         if (fullName == "Unity.Entities.ComponentLookup")
         {
@@ -100,7 +110,7 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
             };
         }
 
-        throw new ArgumentException($"Unable to determine what type this parameter is: {parameterSymbol.Name}");
+        throw new ArgumentException($"Unable to determine what type this parameter is: {parameterSymbol.Name}, {fullName}");
     }
 
     public string GetUsing(int index)
@@ -113,10 +123,16 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
         return $"using {parameterSymbol.ContainingNamespace.ToFullName()};";
     }
     
-    public string GetJobDataDefinition(int index)
+    public string GetJobDataDefinition(bool isUnmanaged, int index)
     {
         switch (_type)
         {
+            case Type.SystemState:
+                if (isUnmanaged)
+                {
+                    throw new InvalidOperationException("SystemState cannot be used with unmanaged jobs");
+                }
+                return $"// SystemState no JobData definition required";
             case Type.UnmanagedReadOnlyDirectComponent:
             case Type.ManagedReadOnlyDirectComponent:
                 return $"[ReadOnly] public ComponentTypeHandle<{parameterSymbol.Type.GetFullName()}> {parameterSymbol.Name}_{index}_TypeHandle;";
@@ -162,6 +178,8 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     {
         switch (_type)
         {
+            case Type.SystemState:
+                return "// SystemState no GetNativeArray definition required";
             case Type.UnmanagedReadOnlyDirectComponent:
             case Type.UnmanagedDirectComponent:
                 return $"var {parameterSymbol.Name}_{index}_Array = chunk.GetNativeArray(ref jobData.{parameterSymbol.Name}_{index}_TypeHandle);";
@@ -193,6 +211,8 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     {
         switch (_type)
         {
+            case Type.SystemState:
+                return "// No Read For SystemState";
             case Type.UnmanagedReadOnlyDirectComponent:
             case Type.UnmanagedDirectComponent:
             case Type.ManagedReadOnlyDirectComponent:
@@ -223,6 +243,7 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     {
         return _type switch
         {
+            Type.SystemState => "ref state",
             Type.TweenEntity => "tweenEntity",
             Type.TargetEntity => "targetEntity",
             Type.UnmanagedReadOnlyDirectComponent => $"in {parameterSymbol.Name}_{index}",
@@ -254,6 +275,8 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     {
         switch (_type)
         {
+            case Type.SystemState:
+                return $"// SystemState no GetInitialiseJobData definition required";
             case Type.UnmanagedReadOnlyDirectComponent:
             case Type.ManagedReadOnlyDirectComponent:
                 return $"_jobData.{parameterSymbol.Name}_{index}_TypeHandle = state.GetComponentTypeHandle<{parameterSymbol.Type.GetFullName()}>();";
@@ -282,6 +305,8 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     {
         switch (_type)
         {
+            case Type.SystemState:
+                return "// SystemState no GetUpdateJobData definition required";
             case Type.UnmanagedReadOnlyDirectComponent:
                 return $"_jobData.{parameterSymbol.Name}_{index}_TypeHandle.Update(ref state);";
             case Type.ReadOnlyIndirectComponent:
@@ -311,6 +336,7 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
     {
         return _type switch
         {
+            Type.SystemState => false,
             Type.UnmanagedReadOnlyDirectComponent => true,
             Type.ReadOnlyIndirectComponent => true,
             Type.UnmanagedDirectComponent => true,
