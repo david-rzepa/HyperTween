@@ -11,10 +11,12 @@ namespace HyperTween.Modules.UniTask.API
         {
             var tcs = new UniTaskCompletionSource();
 
-            tweenHandle.GetBuilder().TweenBuilder.AddComponentObject(tweenHandle.Entity, new TweenCompleteTaskOnStop()
-            {
-                TaskCompletionSource = tcs
-            });
+            tweenHandle.GetBuilder()
+                .Play()
+                .TweenBuilder.AddComponentObject(tweenHandle.Entity, new TweenCompleteTaskOnStop()
+                {
+                    TaskCompletionSource = tcs
+                });
             
             return tcs.Task;
         }
@@ -23,10 +25,12 @@ namespace HyperTween.Modules.UniTask.API
         {
             var tcs = new UniTaskCompletionSource();
             
-            tweenHandle.TweenBuilder.AddComponentObject(tweenHandle.Entity, new TweenCompleteTaskOnStop()
-            {
-                TaskCompletionSource = tcs
-            });
+            tweenHandle
+                .Play()
+                .TweenBuilder.AddComponentObject(tweenHandle.Entity, new TweenCompleteTaskOnStop()
+                {
+                    TaskCompletionSource = tcs
+                });
             
             return tcs.Task;
         }

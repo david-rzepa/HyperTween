@@ -1,6 +1,6 @@
 using Cysharp.Threading.Tasks;
 using HyperTween.ECS.Invoke.Components;
-using HyperTween.ECS.Update.Components;
+using HyperTween.Modules.UniTask.API;
 using Unity.Entities;
 
 namespace HyperTween.Modules.UniTask.Components
@@ -9,9 +9,11 @@ namespace HyperTween.Modules.UniTask.Components
     {
         public UniTaskCompletionSource TaskCompletionSource;
 
-        public void Invoke()
+        public void Invoke(ref SystemState state)
         {
-            TaskCompletionSource.TrySetResult();
+            // TODO: Make this more performant somehow...
+            var tweenCompleteTaskBufferSystem = state.World.GetExistingSystemManaged<TweenCompleteTaskBufferSystem>();
+            tweenCompleteTaskBufferSystem.CompleteTask(TaskCompletionSource);
         }
         
     }
