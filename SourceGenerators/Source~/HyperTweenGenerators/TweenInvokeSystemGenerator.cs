@@ -159,6 +159,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
 
         var invokeComponentName =$"{symbol.Name}{invokeSuffix}";
         var invokeMethodParameters = GetInvokeMethodParameters(symbol);
+        var isUnmanaged = symbol.TypeKind == TypeKind.Struct;
 
         var usings = string.Join("\n", invokeMethodParameters
             .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
@@ -169,7 +170,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
 
         var jobData = string.Join("\n", invokeMethodParameters
             .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
-            .Select(tuple => tuple.parameter.GetJobDataDefinition(tuple.i)));
+            .Select(tuple => tuple.parameter.GetJobDataDefinition(isUnmanaged, tuple.i)));
 
         var queryTypeElements = invokeMethodParameters
             .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
@@ -237,7 +238,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
             .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
             .Select(tuple => tuple.parameter.GetWrite(tuple.i)));
 
-        if (symbol.TypeKind == TypeKind.Struct)
+        if (isUnmanaged)
         {
 
             var allowParallel = invokeMethodParameters.All(parameter => parameter.AllowParallel());
