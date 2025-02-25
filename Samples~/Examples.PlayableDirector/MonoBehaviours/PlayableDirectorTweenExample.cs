@@ -1,7 +1,6 @@
 using HyperTween.API;
 using HyperTween.Modules.InvokeAction.API;
 using HyperTween.Modules.PlayableDirector.API;
-using HyperTween.TweenBuilders;
 using UnityEngine;
 
 namespace HyperTween.Examples.PlayableDirector
@@ -12,8 +11,11 @@ namespace HyperTween.Examples.PlayableDirector
         
         private void Start()
         {
+            gameObject.SetActive(false);
+            
             HyperTweenFactory.CreateTween()
                 .WithPlayableDirector(_playableDirector, 10f)
+                .InvokeActionOnPlay(_ => gameObject.SetActive(true))
                 .Play();
         }
     }
