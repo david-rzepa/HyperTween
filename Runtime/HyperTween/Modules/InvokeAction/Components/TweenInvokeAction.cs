@@ -7,7 +7,7 @@ using Unity.Entities;
 
 namespace HyperTween.Modules.InvokeAction.Components
 {
-    public class TweenInvokeAction : ITweenInvokeOnPlay, ITweenInvokeOnStop
+    public class TweenInvokeAction : ITweenBufferedInvokeOnPlay, ITweenBufferedInvokeOnStop
     {
         public readonly struct Context
         {

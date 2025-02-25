@@ -26,6 +26,14 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
 
     private readonly Type _type = GetType(parameterSymbol, invokeComponentSymbol);
 
+    public bool IsWrite => _type switch
+    {
+        Type.UnmanagedDirectComponent => true,
+        Type.ManagedDirectComponent => true,
+        Type.IndirectComponent => true,
+        _ => false
+    };
+    
     private static Type GetType(IParameterSymbol parameterSymbol, ITypeSymbol invokeComponentSymbol)
     {
         var fullName = parameterSymbol.Type.GetFullName();
@@ -327,6 +335,106 @@ public class JobExecutionParameter(IParameterSymbol parameterSymbol, ITypeSymbol
                 return $"_jobData.{parameterSymbol.Name}_{index}_TweenFactory = ecb.CreateTweenFactory(world);";
              case Type.ParallelTweenFactory:
                 return $"_jobData.{parameterSymbol.Name}_{index}_ParallelTweenFactory = ecb.CreateTweenFactory(world).AsParallelWriter();";
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+    
+    public string GetInitBuffer(int index)
+    {
+        switch (_type)
+        {
+            case Type.UnmanagedReadOnlyDirectComponent:
+                return $"NativeArray<{parameterSymbol.Type.GetFullName()}> {parameterSymbol.Name}_{index}_Buffer = new NativeArray<{parameterSymbol.Type.GetFullName()}>(bufferSize, Allocator.Temp);";
+            case Type.TweenEntity:
+                return $"NativeArray<Entity> {parameterSymbol.Name}_{index}_Buffer = new NativeArray<Entity>(bufferSize, Allocator.Temp);";
+            case Type.TargetEntity:
+                return $"NativeArray<Entity> {parameterSymbol.Name}_{index}_Buffer = new NativeArray<Entity>(bufferSize, Allocator.Temp);";
+            case Type.SystemState:
+            case Type.ReadOnlyIndirectComponent:
+            case Type.EntityCommandBuffer:
+            case Type.ParallelEntityCommandBuffer:
+            case Type.TweenFactory:
+            case Type.ParallelTweenFactory:
+                return $"// {parameterSymbol.Name} does not require InitBuffer";
+            case Type.UnmanagedDirectComponent:
+            case Type.IndirectComponent:
+                throw new InvalidOperationException("Buffered invokes do not support component writes");
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+    
+    public string GetDisposeBuffer(int index)
+    {
+        switch (_type)
+        {
+            case Type.UnmanagedReadOnlyDirectComponent:
+            case Type.TweenEntity:
+            case Type.TargetEntity:
+                return $"{parameterSymbol.Name}_{index}_Buffer.Dispose();";
+            case Type.SystemState:
+            case Type.ReadOnlyIndirectComponent:
+            case Type.EntityCommandBuffer:
+            case Type.ParallelEntityCommandBuffer:
+            case Type.TweenFactory:
+            case Type.ParallelTweenFactory:
+                return $"// {parameterSymbol.Name} does not require DisposeBuffer";
+            case Type.UnmanagedDirectComponent:
+            case Type.IndirectComponent:
+                throw new InvalidOperationException("Buffered invokes do not support component writes");
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+    
+    public string GetWriteToBuffer(int index)
+    {
+        switch (_type)
+        {
+            case Type.UnmanagedReadOnlyDirectComponent:
+                return $"{parameterSymbol.Name}_{index}_Buffer[bufferIndex] = {parameterSymbol.Name}_{index};";
+            case Type.TweenEntity:
+                return $"{parameterSymbol.Name}_{index}_Buffer[bufferIndex] = tweenEntity;";
+            case Type.TargetEntity:
+                return $"{parameterSymbol.Name}_{index}_Buffer[bufferIndex] = targetEntity;";
+            case Type.SystemState:
+            case Type.ReadOnlyIndirectComponent:
+            case Type.EntityCommandBuffer:
+            case Type.ParallelEntityCommandBuffer:
+            case Type.TweenFactory:
+            case Type.ParallelTweenFactory:
+            case Type.UnmanagedDirectComponent:
+            case Type.IndirectComponent:
+                return $"// {parameterSymbol.Name} does not require ReadFromBuffer";
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+    
+    public string GetReadFromBuffer(int index)
+    {
+        switch (_type)
+        {
+            case Type.UnmanagedReadOnlyDirectComponent:
+                return $"var {parameterSymbol.Name}_{index} = {parameterSymbol.Name}_{index}_Buffer[bufferIndex];";
+            case Type.TweenEntity:
+                return $"var tweenEntity = {parameterSymbol.Name}_{index}_Buffer[bufferIndex];";
+            case Type.TargetEntity:
+                return $"var targetEntity = {parameterSymbol.Name}_{index}_Buffer[bufferIndex];";
+            case Type.EntityCommandBuffer:
+                return $"var {parameterSymbol.Name}_{index}_ECB = jobData.{parameterSymbol.Name}_{index}_ECB;";
+            case Type.ParallelEntityCommandBuffer:
+                return $"var {parameterSymbol.Name}_{index}_ECB = jobData.{parameterSymbol.Name}_{index}_ECBPW;";
+            case Type.TweenFactory:
+                return $"var {parameterSymbol.Name}_{index}_TweenFactory = jobData.{parameterSymbol.Name}_{index}_TweenFactory;";
+            case Type.ParallelTweenFactory:
+                return $"var {parameterSymbol.Name}_{index}_ParallelTweenFactory = jobData.{parameterSymbol.Name}_{index}_ParallelTweenFactory;";
+            case Type.SystemState:
+            case Type.ReadOnlyIndirectComponent:
+            case Type.UnmanagedDirectComponent:
+            case Type.IndirectComponent:
+                return $"// {parameterSymbol.Name} does not require ReadFromBuffer";
             default:
                 throw new ArgumentOutOfRangeException();
         }

@@ -13,7 +13,9 @@ namespace HyperTweenGenerators;
 public class TweenInvokeSystemGenerator : ISourceGenerator
 {
     private const string InvokeOnPlaySymbolName = "HyperTween.ECS.Invoke.Components.ITweenInvokeOnPlay";
+    private const string BufferedInvokeOnPlaySymbolName = "HyperTween.ECS.Invoke.Components.ITweenBufferedInvokeOnPlay";
     private const string InvokeOnStopSymbolName = "HyperTween.ECS.Invoke.Components.ITweenInvokeOnStop";
+    private const string BufferedInvokeOnStopSymbolName = "HyperTween.ECS.Invoke.Components.ITweenBufferedInvokeOnStop";
 
     public void Initialize(GeneratorInitializationContext context)
     {
@@ -67,6 +69,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                             $"{prefix}TweenInvokeOnPlaySystem",
                             "OnTweenPlaySystemGroup",
                             "OnPlay",
+                            false,
                             false));
                     }
                     
@@ -76,7 +79,28 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                                 $"{prefix}TweenInvokeOnStopSystem",
                                 "OnTweenStopSystemGroup",
                                 "OnStop",
-                                true));
+                                true,
+                                false));
+                    }
+                    
+                    if (symbol.TryGetImplementedInterface(BufferedInvokeOnPlaySymbolName, out _))
+                    {
+                        generated.AddRange(GenerateOutputSystemsAndComponents(symbol,
+                            $"{prefix}TweenInvokeOnPlaySystem",
+                            "OnTweenPlaySystemGroup",
+                            "OnPlay",
+                            false,
+                            true));
+                    }
+                    
+                    if (symbol.TryGetImplementedInterface(BufferedInvokeOnStopSymbolName, out _))
+                    {
+                        generated.AddRange(GenerateOutputSystemsAndComponents(symbol,
+                            $"{prefix}TweenInvokeOnStopSystem",
+                            "OnTweenStopSystemGroup",
+                            "OnStop",
+                            true,
+                            true));
                     }
 
                     if (generated.Count == 0)
@@ -153,13 +177,23 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
         return methodSymbol;
     }
 
-    private IEnumerable<string> GenerateOutputSystemsAndComponents(ITypeSymbol symbol, string baseSystemName, string systemGroupName, string invokeSuffix, bool isStop)
+    private IEnumerable<string> GenerateOutputSystemsAndComponents(ITypeSymbol symbol, string baseSystemName, string systemGroupName, string invokeSuffix, bool isStop, bool isBuffered)
     {
         var componentNamespace = symbol.ContainingNamespace.ToFullName();
 
         var invokeComponentName =$"{symbol.Name}{invokeSuffix}";
         var invokeMethodParameters = GetInvokeMethodParameters(symbol);
         var isUnmanaged = symbol.TypeKind == TypeKind.Struct;
+
+        if (isBuffered && isUnmanaged)
+        {
+            throw new InvalidOperationException("BufferedTweenInvoke only supports managed types");
+        }
+        
+        if (isBuffered && invokeMethodParameters.Any(parameter => parameter.IsWrite))
+        {
+            throw new InvalidOperationException("BufferedTweenInvoke does not support component writes");
+        }
 
         var usings = string.Join("\n", invokeMethodParameters
             .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
@@ -242,7 +276,44 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
             .Where(data => data.AttributeClass?.GetFullName() == "Unity.Entities.UpdateAfterAttribute" ||
                            data.AttributeClass?.GetFullName() == "Unity.Entities.UpdateBeforeAttribute")
             .Select(data => $"[{data.AttributeClass.ToFullName()}(typeof({data.ConstructorArguments.First().Value}))]"));
+
+        var getBufferSize = isBuffered ? $"var bufferSize = _query.CalculateEntityCount();\n" : "";
+        var initBufferIndex = isBuffered ? $"var bufferIndex = 0;\n" : "";
+        var incrementBufferIndex = isBuffered ? $"bufferIndex++;\n" : "";
         
+        var bufferInits = isBuffered ? string.Join("\n", invokeMethodParameters
+            .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
+            .Select(tuple => tuple.parameter.GetInitBuffer(tuple.i))
+            .Append($"var invoke_Buffer = ArrayPool<{invokeComponentName}>.Shared.Rent(bufferSize);")) : "";
+        
+        var bufferDisposes = isBuffered ? string.Join("\n", invokeMethodParameters
+            .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
+            .Select(tuple => tuple.parameter.GetDisposeBuffer(tuple.i))
+            .Append($"ArrayPool<{invokeComponentName}>.Shared.Return(invoke_Buffer);")) : "";
+        
+        var bufferWrites = isBuffered ? string.Join("\n", invokeMethodParameters
+            .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
+            .Select(tuple => tuple.parameter.GetWriteToBuffer(tuple.i))
+            .Append($"invoke_Buffer[bufferIndex] = invokeComponent;")) : "";
+        
+        var bufferReads = isBuffered ? string.Join("\n", invokeMethodParameters
+            .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
+            .Select(tuple => tuple.parameter.GetReadFromBuffer(tuple.i))
+            .Append($"var invokeComponent = invoke_Buffer[bufferIndex];")) : "";
+
+        var nonBufferedInvoke = isBuffered ? "" : $"invokeComponent.Invoke({invokeParams});\n";
+        
+        string iterateBuffer = "";
+        if (isBuffered)
+        {
+            iterateBuffer = $$"""
+                              for(bufferIndex = 0; bufferIndex < bufferSize ; bufferIndex++)
+                              {
+                                {{bufferReads}}
+                                invokeComponent.Invoke({{invokeParams}});
+                              }
+                              """;
+        }
         if (isUnmanaged)
         {
 
@@ -309,6 +380,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                                            var jobData = JobData;
                                
                                            {{getNativeArrays}}
+                                           
                                            var invokeComponents = chunk.GetNativeArray(ref jobData.InvokeTypeHandle);
                                            var entities = chunk.GetNativeArray(jobData.EntityTypeHandle);
                            
@@ -323,9 +395,9 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                                                    var targetEntity = tweenTargetComponents[i].Target;
                                                    var invokeComponent = invokeComponents[i];
                                                
-                                                   invokeComponent.Invoke({{invokeParams}});
-                                                   
+                                                   {{nonBufferedInvoke}}
                                                    {{writes}}
+                                                   
                                                    // TODO: Only perform this write if we can detect that Invoke() writes to a member
                                                    // Also need to account for child method calls...
                                                    invokeComponents[i] = invokeComponent;
@@ -341,9 +413,9 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                                                    var targetEntity = tweenEntity;
                                                    var invokeComponent = invokeComponents[i];
                            
-                                                   invokeComponent.Invoke({{invokeParams}});
-                                                   
+                                                   {{nonBufferedInvoke}}                        
                                                    {{writes}}
+                                                   
                                                    // TODO: Only perform this write if we can detect that Invoke() writes to a member
                                                    // Also need to account for child method calls...
                                                    invokeComponents[i] = invokeComponent;
@@ -427,6 +499,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                            using HyperTween.Auto.Components;
                            using HyperTween.API;
                            using HyperTween.TweenBuilders;
+                           using System.Buffers;
                            {{usings}}
 
                            namespace HyperTween.Auto.Systems
@@ -486,50 +559,70 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                            
                                        var jobData = _jobData;
                            
-                                       using var chunks = _query.ToArchetypeChunkArray(Allocator.Temp);
-                                       foreach (var chunk in chunks)
-                                       {
-                                           {{getNativeArrays}}
-                                           var invokeComponents = chunk.GetManagedComponentAccessor<{{invokeComponentName}}>(ref jobData.InvokeTypeHandle, state.EntityManager);
-                                           var entities = chunk.GetNativeArray(jobData.EntityTypeHandle);
-                                           
-                                           if (chunk.Has<TweenTarget>())
+                                       {{getBufferSize}}
+                                       {{initBufferIndex}}
+                                       {{bufferInits}}
+                                       
+                                       try
+                                       {                
+                                           using var chunks = _query.ToArchetypeChunkArray(Allocator.Temp);
+                                           foreach (var chunk in chunks)
                                            {
-                                               var tweenTargetComponents = chunk.GetNativeArray(ref jobData.TweenTargetTypeHandle);
-                                               var enumerator = new ChunkEntityEnumerator(false, default, chunk.Count);
-                                               while(enumerator.NextEntityIndex(out var i))
-                                               {
-                                                   {{reads}}
-                                                   var tweenEntity = entities[i];
-                                                   var targetEntity = tweenTargetComponents[i].Target;
-                                                   var invokeComponent = invokeComponents[i];
+                                               {{getNativeArrays}}
                                                
-                                                   invokeComponent.Invoke({{invokeParams}});
-                                                   
-                                                   {{writes}}
-                                                   // TODO: Only perform this write if we can detect that Invoke() writes to a member
-                                                   // Also need to account for child method calls...
-                                                   invokeComponents[i] = invokeComponent;
-                                               }
-                                           }
-                                           else
-                                           {
-                                               var enumerator = new ChunkEntityEnumerator(false, default, chunk.Count);
-                                               while(enumerator.NextEntityIndex(out var i))
+                                               var invokeComponents = chunk.GetManagedComponentAccessor<{{invokeComponentName}}>(ref jobData.InvokeTypeHandle, state.EntityManager);
+                                               var entities = chunk.GetNativeArray(jobData.EntityTypeHandle);
+                                               
+                                               if (chunk.Has<TweenTarget>())
                                                {
-                                                   {{reads}}
-                                                   var tweenEntity = entities[i];
-                                                   var targetEntity = tweenEntity;
-                                                   var invokeComponent = invokeComponents[i];
-                                           
-                                                   invokeComponent.Invoke({{invokeParams}});
+                                                   var tweenTargetComponents = chunk.GetNativeArray(ref jobData.TweenTargetTypeHandle);
+                                                   var enumerator = new ChunkEntityEnumerator(false, default, chunk.Count);
+                                                   while(enumerator.NextEntityIndex(out var i))
+                                                   {
+                                                       {{reads}}
+                                                       var tweenEntity = entities[i];
+                                                       var targetEntity = tweenTargetComponents[i].Target;
+                                                       var invokeComponent = invokeComponents[i];
                                                    
-                                                   {{writes}}
-                                                   // TODO: Only perform this write if we can detect that Invoke() writes to a member
-                                                   // Also need to account for child method calls...
-                                                   invokeComponents[i] = invokeComponent;
+                                                       {{bufferWrites}}
+                                                       {{nonBufferedInvoke}}
+                                                       {{writes}}
+                                                       
+                                                       // TODO: Only perform this write if we can detect that Invoke() writes to a member
+                                                       // Also need to account for child method calls...
+                                                       invokeComponents[i] = invokeComponent;
+                                                       
+                                                       {{incrementBufferIndex}}
+                                                   }
                                                }
-                                           }
+                                               else
+                                               {
+                                                   var enumerator = new ChunkEntityEnumerator(false, default, chunk.Count);
+                                                   while(enumerator.NextEntityIndex(out var i))
+                                                   {
+                                                       {{reads}}
+                                                       var tweenEntity = entities[i];
+                                                       var targetEntity = tweenEntity;
+                                                       var invokeComponent = invokeComponents[i];
+                                               
+                                                       {{bufferWrites}}
+                                                       {{nonBufferedInvoke}}
+                                                       {{writes}}
+                                                       
+                                                       // TODO: Only perform this write if we can detect that Invoke() writes to a member
+                                                       // Also need to account for child method calls...
+                                                       invokeComponents[i] = invokeComponent;
+                                                       
+                                                       {{incrementBufferIndex}}
+                                                   }
+                                               }
+                                            }
+                                            
+                                            {{iterateBuffer}}
+                                        }
+                                        finally
+                                        {
+                                            {{bufferDisposes}}
                                         }
                                    }
                                }
