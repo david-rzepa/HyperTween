@@ -238,6 +238,11 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
             .Zip(Enumerable.Range(0, invokeMethodParameters.Length), (parameter, i) => (parameter, i))
             .Select(tuple => tuple.parameter.GetWrite(tuple.i)));
 
+        var orderAttributes = string.Join("\n", symbol.GetAttributes()
+            .Where(data => data.AttributeClass?.GetFullName() == "Unity.Entities.UpdateAfterAttribute" ||
+                           data.AttributeClass?.GetFullName() == "Unity.Entities.UpdateBeforeAttribute")
+            .Select(data => $"[{data.AttributeClass.ToFullName()}(typeof({data.ConstructorArguments.First().Value}))]"));
+        
         if (isUnmanaged)
         {
 
@@ -278,6 +283,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                                [global::System.Runtime.CompilerServices.CompilerGenerated]
                                [UpdateInGroup(typeof({{systemGroupName}}))]
                                [BurstCompile]
+                               {{orderAttributes}}
                                public partial struct {{systemName}} : ISystem
                                {
                                    public struct InvokeJobData
@@ -427,6 +433,7 @@ public class TweenInvokeSystemGenerator : ISourceGenerator
                            {
                                [global::System.Runtime.CompilerServices.CompilerGenerated]
                                [UpdateInGroup(typeof({{systemGroupName}}))]
+                               {{orderAttributes}}
                                public partial struct {{systemName}} : ISystem
                                {
                                    public struct InvokeJobData
